@@ -1,0 +1,399 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>8-Ball Pool Game</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background-color: #222;
+            font-family: Arial, sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            color: #fff;
+        }
+        #gameContainer {
+            position: relative;
+            width: 800px;
+            height: 400px;
+            border: 2px solid #654321;
+            background-color: #2d5016;
+            box-shadow: 0 0 20px rgba(0,0,0,0.5);
+        }
+        #poolTable {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            width: 760px;
+            height: 360px;
+            border: 2px solid #000;
+            background-color: #0f4c0f;
+        }
+        canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+        }
+        .pocket {
+            position: absolute;
+            width: 30px;
+            height: 30px;
+            background-color: #000;
+            border-radius: 50%;
+            z-index: 10;
+        }
+        #pocket1 { top: -15px; left: -15px; }
+        #pocket2 { top: -15px; left: 365px; }
+        #pocket3 { top: -15px; right: -15px; }
+        #pocket4 { bottom: -15px; left: -15px; }
+        #pocket5 { bottom: -15px; left: 365px; }
+        #pocket6 { bottom: -15px; right: -15px; }
+
+        .power-gauge {
+            position: absolute;
+            bottom: 10px;
+            left: 10px;
+            width: 200px;
+            height: 20px;
+            background-color: #444;
+            border: 1px solid #666;
+        }
+        .power-fill {
+            height: 100%;
+            width: 0%;
+            background-color: #ff6b6b;
+            transition: width 0.1s;
+        }
+        .ball-info {
+            position: absolute;
+            bottom: 40px;
+            right: 10px;
+            font-size: 14px;
+        }
+        .shoot-button {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            padding: 10px 20px;
+            background-color: #007bff;
+            color: #fff;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+    </style>
+</head>
+<body>
+    <div id="gameContainer">
+        <div id="poolTable">
+            <div class="pocket" id="pocket1"></div>
+            <div class="pocket" id="pocket2"></div>
+            <div class="pocket" id="pocket3"></div>
+            <div class="pocket" id="pocket4"></div>
+            <div class="pocket" id="pocket5"></div>
+            <div class="pocket" id="pocket6"></div>
+            <canvas id="poolCanvas"></canvas>
+        </div>
+        <div class="power-gauge">
+            <div class="power-fill" id="powerFill"></div>
+        </div>
+        <div class="ball-info">
+            <p>Balls Remaining: <span id="ballsRemaining">16</span></p>
+            <p>Score: <span id="score">0</span></p>
+        </div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('poolCanvas');
+        const ctx = canvas.getContext('2d');
+        canvas.width = 760;
+        canvas.height = 360;
+
+        // Ball properties
+        const balls = [];
+        const friction = 0.98;
+        const pocketRadius = 15;
+
+        // Bridge rack positions (manual setup for simplicity)
+        const rackPositions = [
+            { x: 600, y: 180 }, // Cue ball
+            { x: 400, y: 180 },
+            { x: 380, y: 165 },
+            { x: 380, y: 195 },
+            { x: 360, y: 150 },
+            { x: 360, y: 180 },
+            { x: 360, y: 210 },
+            { x: 340, y: 135 },
+            { x: 340, y: 165 },
+            { x: 340, y: 195 },
+            { x: 340, y: 225 },
+            { x: 320, y: 120 },
+            { x: 320, y: 150 },
+            { x: 320, y: 180 },
+            { x: 320, y: 210 },
+            { x: 320, y: 240 },
+            { x: 320, y: 270 }
+        ];
+
+        // Colors for balls
+        const ballColors = [
+            'white', // Cue ball
+            'yellow', 'blue', 'red', 'purple', 'orange', 'green', 'red',
+            'yellow', 'blue', 'red', 'purple', 'orange', 'green', 'red', 'black'
+        ];
+
+        // Initialize balls
+        for (let i = 0; i < 16; i++) {
+            balls.push({
+                x: rackPositions[i].x,
+                y: rackPositions[i].y,
+                vx: 0,
+                vy: 0,
+                radius: 10,
+                color: ballColors[i],
+                inPocket: false
+            });
+        }
+
+        let cueBall = balls[0];
+        let gameState = 'aiming';
+        let mouseX = 0, mouseY = 0;
+        let power = 0;
+        let score = 0;
+        let ballsRemaining = 15; // Not counting cue ball
+
+        // Update display
+        function updateDisplay() {
+            document.getElementById('score').textContent = score;
+            document.getElementById('ballsRemaining').textContent = ballsRemaining;
+            document.getElementById('powerFill').style.width = `${power * 100}%`;
+        }
+
+        // Draw table and elements
+        function draw() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            // Draw table corners
+            ctx.fillStyle = '#654321';
+            ctx.beginPath();
+            ctx.arc(30, 30, 30, 0, Math.PI / 2);
+            ctx.arc(canvas.width - 30, 30, 30, Math.PI / 2, Math.PI);
+            ctx.arc(30, canvas.height - 30, 30, Math.PI, 3 * Math.PI / 2);
+            ctx.arc(canvas.width - 30, canvas.height - 30, 30, 3 * Math.PI / 2, 2 * Math.PI);
+            ctx.fill();
+
+            // Draw balls
+            balls.forEach(ball => {
+                if (!ball.inPocket) {
+                    ctx.beginPath();
+                    ctx.arc(ball.x, ball.y, ball.radius, 0, 2 * Math.PI);
+                    ctx.fillStyle = ball.color;
+                    ctx.fill();
+                    ctx.strokeStyle = ball.color === 'white' ? '#ccc' : '#000';
+                    ctx.lineWidth = 2;
+                    ctx.stroke();
+
+                    // Simple ball number for non-cue balls
+                    if (ball.color !== 'white') {
+                        ctx.font = '10px Arial';
+                        ctx.fillStyle = '#fff';
+                        ctx.textAlign = 'center';
+                        ctx.fillText(balls.indexOf(ball), ball.x, ball.y + 5);
+                    }
+                }
+            });
+
+            // Draw cue line during aiming
+            if (gameState === 'aiming') {
+                ctx.strokeStyle = 'white';
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.moveTo(cueBall.x, cueBall.y);
+                ctx.lineTo(mouseX, mouseY);
+                ctx.stroke();
+
+                // Power indicator circle
+                ctx.beginPath();
+                ctx.arc(cueBall.x, cueBall.y, power * 50 + 20, 0, 2 * Math.PI);
+                ctx.strokeStyle = 'yellow';
+                ctx.lineWidth = 2;
+                ctx.stroke();
+            }
+        }
+
+        // Check collision with pockets
+        function checkPockets() {
+            const pockets = [
+                { x: 30, y: 30 }, { x: canvas.width / 2, y: 30 }, { x: canvas.width - 30, y: 30 },
+                { x: 30, y: canvas.height - 30 }, { x: canvas.width / 2, y: canvas.height - 30 }, { x: canvas.width - 30, y: canvas.height - 30 }
+            ];
+
+            for (let pocket of pockets) {
+                balls.forEach((ball, index) => {
+                    if (!ball.inPocket) {
+                        const dx = ball.x - pocket.x;
+                        const dy = ball.y - pocket.y;
+                        if (Math.sqrt(dx * dx + dy * dy) < pocketRadius + ball.radius) {
+                            ball.inPocket = true;
+                            if (index === 0) {
+                                // Cue ball potted, reset
+                                ball.x = 180;
+                                ball.y = 180;
+                                ball.vx = 0;
+                                ball.vy = 0;
+                                ball.inPocket = false;
+                            } else {
+                                score += 10;
+                                ballsRemaining--;
+                            }
+                        }
+                    }
+                });
+            }
+
+            if (ballsRemaining === 0) {
+                alert('You won! Score: ' + score);
+                resetGame();
+            }
+        }
+
+        // Update ball physics
+        function update() {
+            balls.forEach(ball => {
+                if (!ball.inPocket) {
+                    ball.x += ball.vx;
+                    ball.y += ball.vy;
+
+                    // Apply friction
+                    ball.vx *= friction;
+                    ball.vy *= friction;
+
+                    // Ball-to-ball collision (simple)
+                    balls.forEach(otherBall => {
+                        if (ball !== otherBall && !otherBall.inPocket && !ball.inPocket) {
+                            const dx = ball.x - otherBall.x;
+                            const dy = ball.y - otherBall.y;
+                            const distance = Math.sqrt(dx * dx + dy * dy);
+                            if (distance < ball.radius + otherBall.radius) {
+                                // Simple elastic collision
+                                const angle = Math.atan2(dy, dx);
+                                const sin = Math.sin(angle);
+                                const cos = Math.cos(angle);
+
+                                const v1 = { x: ball.vx * cos + ball.vy * sin, y: ball.vy * cos - ball.vx * sin };
+                                const v2 = { x: otherBall.vx * cos + otherBall.vy * sin, y: otherBall.vy * cos - otherBall.vx * sin };
+
+                                ball.vx = v2.x * cos - v1.y * sin;
+                                ball.vy = v1.y * cos + v2.x * sin;
+                                otherBall.vx = v1.x * cos - v2.y * sin;
+                                otherBall.vy = v2.y * cos + v1.x * sin;
+
+                                // Separate balls
+                                const overlap = (ball.radius + otherBall.radius) - distance;
+                                ball.x += overlap * cos / 2;
+                                ball.y += overlap * sin / 2;
+                                otherBall.x -= overlap * cos / 2;
+                                otherBall.y -= overlap * sin / 2;
+                            }
+                        }
+                    });
+
+                    // Bounce off walls (simple)
+                    if (ball.x - ball.radius < 0) {
+                        ball.x = ball.radius;
+                        ball.vx = -ball.vx;
+                    } else if (ball.x + ball.radius > canvas.width) {
+                        ball.x = canvas.width - ball.radius;
+                        ball.vx = -ball.vx;
+                    }
+
+                    if (ball.y - ball.radius < 0) {
+                        ball.y = ball.radius;
+                        ball.vy = -ball.vy;
+                    } else if (ball.y + ball.radius > canvas.height) {
+                        ball.y = canvas.height - ball.radius;
+                        ball.vy = -ball.vy;
+                    }
+
+                    // Stop if velocity is very low
+                    if (Math.abs(ball.vx) < 0.1 && Math.abs(ball.vy) < 0.1) {
+                        ball.vx = 0;
+                        ball.vy = 0;
+                    }
+                }
+            });
+
+            // Check if all balls are stationary
+            let allStationary = true;
+            balls.forEach(ball => {
+                if (ball.vx !== 0 || ball.vy !== 0) {
+                    allStationary = false;
+                }
+            });
+
+            if (allStationary && gameState === 'playing') {
+                gameState = 'aiming';
+            }
+        }
+
+        // Reset game
+        function resetGame() {
+            balls.forEach((ball, i) => {
+                ball.x = rackPositions[i].x;
+                ball.y = rackPositions[i].y;
+                ball.vx = 0;
+                ball.vy = 0;
+                ball.inPocket = false;
+            });
+            score = 0;
+            ballsRemaining = 15;
+            gameState = 'aiming';
+        }
+
+        // Event listeners
+        canvas.addEventListener('mousemove', (e) => {
+            const rect = canvas.getBoundingClientRect();
+            mouseX = e.clientX - rect.left;
+            mouseY = e.clientY - rect.top;
+
+            if (gameState === 'aiming') {
+                const dx = mouseX - cueBall.x;
+                const dy = mouseY - cueBall.y;
+                power = Math.min(Math.sqrt(dx * dx + dy * dy) / 300, 1);
+            }
+        });
+
+        canvas.addEventListener('click', () => {
+            if (gameState === 'aiming') {
+                const dx = mouseX - cueBall.x;
+                const dy = mouseY - cueBall.y;
+                const angle = Math.atan2(dy, dx);
+                const force = power * 10;
+
+                cueBall.vx = -Math.cos(angle) * force;
+                cueBall.vy = -Math.sin(angle) * force;
+
+                gameState = 'playing';
+            }
+        });
+
+        // Animation loop
+        function animate() {
+            update();
+            checkPockets();
+            draw();
+            updateDisplay();
+            requestAnimationFrame(animate);
+        }
+
+        animate();
+    </script>
+</body>
+</html>
+</content>
+</create_file>
